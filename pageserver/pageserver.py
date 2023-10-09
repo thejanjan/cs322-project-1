@@ -5,14 +5,9 @@
   This trivial implementation is not robust:  We have omitted decent
   error handling and many other things to keep the illustration as simple
   as possible.
-
-  FIXME:
-  Currently this program always serves an ascii graphic of a cat.
-  Change it to serve files if they end with .html or .css, and are
-  located in ./pages  (where '.' is the directory from which this
-  program is run).
 """
 
+import os        # Directory traversal
 import config    # Configure from .ini files and command line
 import logging   # Better than print statements
 logging.basicConfig(format='%(levelname)s:%(message)s',
@@ -59,15 +54,6 @@ def serve(sock, func):
         _thread.start_new_thread(func, (clientsocket,))
 
 
-##
-# Starter version only serves cat pictures. In fact, only a
-# particular cat picture.  This one.
-##
-CAT = """
-     ^ ^
-   =(   )=
-"""
-
 # HTTP response codes, as the strings we will actually send.
 # See:  https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
 # or    http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html
@@ -91,9 +77,31 @@ def respond(sock):
 
     parts = request.split()
     if len(parts) > 1 and parts[0] == "GET":
-        transmit(STATUS_OK, sock)
-        transmit(CAT, sock)
+        # We're handling a GET request.
+        # Ensure that the request is safe.
+        request_path = parts[1]
+        if validate_path(request_path):
+            # Locate the requested file.
+            options = get_options()
+            full_path = options.DOCROOT + request_path
+            if os.path.isfile(full_path):
+                # File found, serve it.
+                log.info("Serving file for request: {}".format(full_path))
+                transmit(STATUS_OK, sock)
+                with open(full_path, 'r') as f:
+                    transmit(f.read(), sock)
+            else:
+                # File could not be found
+                log.info("Request could not find file: {}".format(full_path))
+                transmit(STATUS_NOT_FOUND, sock)
+                transmit("Could not find file from request", sock)
+        else:
+            # Client's trying to steal my stuff!!
+            log.info("Request attempted an illegal path: {}".format(request_path))
+            transmit(STATUS_FORBIDDEN, sock)
+            transmit("Request contained illegal path", sock)
     else:
+        # Request was unhandled.
         log.info("Unhandled request: {}".format(request))
         transmit(STATUS_NOT_IMPLEMENTED, sock)
         transmit("\nI don't handle this request: {}\n".format(request), sock)
@@ -109,6 +117,15 @@ def transmit(msg, sock):
     while sent < len(msg):
         buff = bytes(msg[sent:], encoding="utf-8")
         sent += sock.send(buff)
+
+
+def validate_path(path: str) -> bool:
+    """Returns True if the provided path is not forbidden."""
+    substrings = ['..', '~']
+    for substr in substrings:
+        if substr in path:
+            return False
+    return True
 
 ###
 #
